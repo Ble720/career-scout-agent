@@ -1,0 +1,3 @@
+# Career Scout Agent: Autonomous Job Hunter & Tailoring Workspace
+
+An **Human-in-the-Loop (HITL) AI agent** that automates the end-to-end lifecycle of job hunting. Powered by **LangGraph**, the agent orchestrates complex multi-stage workflows to crawl the live web for targeted listings, extract structured payloads using **Google Gemini 2.5 Flash**, execute semantic recommendation calculations through **ChromaDB**, and manage live conversational tailoring workspaces via a unified **Streamlit** dashboard. All transaction data is securely stored in a durable, indexed **PostgreSQL** relational database.
