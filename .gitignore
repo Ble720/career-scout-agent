@@ -1,0 +1,24 @@
+# ==============================================================================
+# SECRETS & LOCAL ENVIRONMENT CONFIGURATION
+# ==============================================================================
+.env
+
+# ==============================================================================
+# RUNTIME ARTIFACTS & LOGGING
+# ==============================================================================
+# Application logs recording agent logic, chat histories, and database connection data
+*.log
+logs/
+
+# Standard Python compilation caches to keep the repository clean
+__pycache__/
+*.pyc
+
+# ==============================================================================
+# LOCAL COMPILED ARTIFACTS & SYSTEM JUNK
+# ==============================================================================
+# Local PDF exports of generated LaTeX resumes
+*.pdf
+
+# Operating system desktop configuration metadata
+.DS_Store
