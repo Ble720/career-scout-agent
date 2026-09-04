@@ -1,6 +1,20 @@
 import datetime
+from langchain_core.runnables import RunnableConfig
+from src.state import AgentState
+from src.schemas import JobListing
 
-def process_and_parse_node(state: AgentState) -> dict:
+def process_and_parse_node(state: AgentState, config: RunnableConfig) -> dict:
+    raw_results = state.get("raw_search_results", [])
+    if not raw_results:
+        print("No raw search results found to parse. Skipping node.")
+        return {}
+    
+    base_llm = config.get("configurable", {}).get("gemini_client")
+    if not base_llm:
+        raise ValueError("Gemini client was not provided in graph configuration.")
+    
+    structured_llm = base_llm.with_structured_output(JobListing)
+    
     new_jobs = []
     seen = state["seen_urls"].copy()
     
@@ -12,21 +26,25 @@ def process_and_parse_node(state: AgentState) -> dict:
             continue
             
         try:
-            # Build the mapping prompt
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            
             prompt = (
                 f"Extract details for this job listing. URL: {url}. "
-                f"Verification Timestamp: {datetime.datetime.utcnow().isoformat()}Z. \n\n"
+                f"Verification Timestamp: {timestamp}. \n\n"
                 f"RAW WEBPAGE CONTENT:\n{raw_text}"
             )
             
-            # Gemini handles the validation against your JobListing BaseModel automatically
-            job_data: JobListing = llm.invoke(prompt)
+            job_data: JobListing = structured_llm.invoke(prompt)
             
             new_jobs.append(job_data)
             seen.add(url)
-            print(f"✅ Gemini Parsed: {job_data.title} @ {job_data.company}")
+            print(f"Gemini Parsed: {job_data.title} @ {job_data.company}")
             
         except Exception as e:
-            print(f"❌ Gemini validation failed for {url}: {e}")
+            print(f"Gemini validation failed for {url}: {e}")
             
-    return {"extracted_jobs": new_jobs, "seen_urls": seen, "raw_search_results": 0}
+    return {
+        "extracted_jobs": new_jobs, 
+        "seen_urls": seen, 
+        "raw_search_results": []
+    }
