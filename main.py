@@ -5,7 +5,15 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from tavily import TavilyClient
 from src.graph import graph
 
+from psycopg_pool import ConnectionPool
+from src.db_utils import bootstrap_database
+
 load_dotenv()
+
+db_url = os.getenv("DATABASE_URL", "postgresql://localhost/career_scout")
+db_pool = ConnectionPool(conninfo=db_url, min_size=1, max_size=5)
+bootstrap_database(db_pool)
+
 live_tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 live_gemini_client = ChatGoogleGenerativeAI(
@@ -17,7 +25,8 @@ live_gemini_client = ChatGoogleGenerativeAI(
 config = {
     "configurable": {
         "tavily_client": live_tavily_client,
-        "gemini_client": live_gemini_client 
+        "gemini_client": live_gemini_client ,
+        "db_pool": db_pool,
     }
 }
 
@@ -28,7 +37,7 @@ initial_state = {
     "raw_search_results": [],
     "extracted_jobs": [],
     "current_job_to_research": None,
-    "company_research_raw": [],
+    "raw_company_research_results": [],
     "final_cover_letters": []
 }
 

@@ -21,7 +21,7 @@ job_hunter_station = generalized_search_node.bind_config(
 )
 
 company_researcher_station = generalized_search_node.bind_config(
-    configurable={"destination_key": "company_research_raw", "max_results": 3}
+    configurable={"destination_key": "raw_company_search_results", "max_results": 3}
 )
 
 # 2. Add them as distinct node addresses inside your LangGraph blueprints

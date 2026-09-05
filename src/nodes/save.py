@@ -1,60 +1,33 @@
+from langchain_core.runnables import RunnableConfig
+from src.state import AgentState
 
+from src.database import (
+    upsert_job_listing, 
+    upsert_company_profile, 
+    upsert_tailored_documents
+)
 
-def init_db(conn) -> None:
-    """Creates the production schemas once using the active connection."""
-    with conn.cursor() as cur:
-        # 1. Job Listings Table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS job_listing (
-                id SERIAL PRIMARY KEY,
-                title TEXT NOT NULL,
-                company TEXT NOT NULL,
-                location TEXT,
-                posted_date TIMESTAMPTZ,
-                employment_type TEXT,
-                experience_level TEXT,
-                salary_range TEXT,
-                required_skills TEXT[],
-                responsibilities TEXT[],
-                url TEXT NOT NULL UNIQUE,
-                is_valid BOOLEAN NOT NULL DEFAULT TRUE,
-                verified_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_leads_posted_date ON job_listing(posted_date)")
+def save_all_artifacts_node(state: AgentState, config: RunnableConfig) -> dict:
+    """Unified conductor node that flushes active state artifacts to PostgreSQL."""
+    db_pool = config.get("configurable", {}).get("db_pool")
+    if not db_pool:
+        raise ValueError("Database connection pool was not provided in graph configuration.")
+
+    extracted_jobs = state.get("extracted_jobs", [])
+    profile_data = state.get("current_company_profile")
+    final_letters = state.get("final_cover_letters", [])
+    
+    with db_pool.connection() as conn:
+        with conn.cursor() as cur:
+            for listing in extracted_jobs:
+                upsert_job_listing(cur, listing)
+                
+            if profile_data:
+                upsert_company_profile(cur, profile_data)
+                
+            for letter in final_letters:
+                upsert_tailored_documents(cur, letter)
+                
+        print("Database synchronization transaction completed successfully.")
         
-        # 2. Company Profiles Table (Bug Fixes Applied)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS company_profile (
-                company TEXT PRIMARY KEY,
-                industry TEXT,
-                size_or_stage TEXT,
-                about TEXT NOT NULL,
-                culture TEXT[] NOT NULL,
-                recent_news TEXT[] NOT NULL,
-                cover_letter_angles JSONB NOT NULL, -- Fixed syntax constraint
-                resume_tailoring_notes TEXT[] NOT NULL,
-                cautions TEXT[] NOT NULL,
-                sources TEXT[] NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_company_profile_name ON company_profile(company)")
-
-        # 3. Resume Table (Linked explicitly to job listing IDs)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS resume (
-                job_listing_id INT PRIMARY KEY REFERENCES job_listing(id) ON DELETE CASCADE,
-                latex_code TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 4. Cover Letter Table 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cover_letter (
-                job_listing_id INT PRIMARY KEY REFERENCES job_listing(id) ON DELETE CASCADE,
-                letter_text TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+    return {}
