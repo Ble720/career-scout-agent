@@ -1,79 +1,103 @@
-import json
+import os
+from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
 
-def upsert_job_listing(cur, listing) -> None:
-    """Handles pure SQL execution for a single job listing."""
-    cur.execute(
-        """
-        INSERT INTO job_listing (
-            title, company, location, posted_date, employment_type,
-            experience_level, salary_range, required_skills, responsibilities, url
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (url) DO UPDATE SET
-            verified_at = CURRENT_TIMESTAMP,
-            is_valid = TRUE;
-        """,
-        (
-            listing.title, listing.company, listing.location, listing.posted_date,
-            listing.employment_type, listing.experience_level, listing.salary_range,
-            listing.required_skills, listing.responsibilities, listing.url
-        )
-    )
+from src.models import JobListing, CompanyProfile, TailoredCoverLetter, TailoredLatexResume
 
-def upsert_company_profile(cur, profile) -> None:
-    """Handles pure SQL execution for a corporate research profile."""
-    cur.execute(
-        """
-        INSERT INTO company_profile (
-            company, industry, size_or_stage, about, culture,
-            recent_news, cover_letter_angles, resume_tailoring_notes, cautions, sources
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (company) DO UPDATE SET
-            about = EXCLUDED.about,
-            culture = EXCLUDED.culture,
-            recent_news = EXCLUDED.recent_news,
-            cover_letter_angles = EXCLUDED.cover_letter_angles,
-            updated_at = CURRENT_TIMESTAMP;
-        """,
-        (
-            profile.company, profile.industry, profile.size_or_stage,
-            profile.about, profile.culture, profile.recent_news,
-            json.dumps(profile.cover_letter_angles),
-            profile.resume_tailoring_notes, profile.cautions, profile.sources
-        )
-    )
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/career_scout"
+)
 
-def upsert_tailored_documents(cur, letter) -> None:
-    """Resolves foreign key linkages and upserts application packages."""
-    cur.execute("SELECT id FROM job_listing WHERE url = %s LIMIT 1", (letter.get("url"),))
-    job_row = cur.fetchone()
-    
-    if not job_row:
-        print(f"⚠️ Could not map document to job row for URL: {letter.get('url')}")
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True
+)
+
+async_session_factory = async_sessionmaker(
+    engine, 
+    class_=AsyncSession, 
+    expire_on_commit=False
+)
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session_factory() as session:
+        yield session
+
+async def upsert_job_listing(session: AsyncSession, listing_data: dict) -> None:
+    """
+    Upserts a JobListing using SQLModel ORM. 
+    Updates listing if URL exists, otherwise creates a new record.
+    """
+    statement = select(JobListing).where(JobListing.url == listing_data.url)
+    result = await session.exec(statement)
+    existing_job = result.first()
+
+    if existing_job:
+        # Update existing record
+        for key, value in listing_data.model_dump(exclude_unset=True).items():
+            if key not in ("id", "created_at"):
+                setattr(existing_job, key, value)
+    else:
+        # Add new listing
+        session.add(listing_data)
+
+    await session.commit()
+
+async def upsert_company_profile(session: AsyncSession, profile_data) -> None:
+    """
+    Upserts a CompanyProfile using SQLModel ORM.
+    Updates profile if company name exists, otherwise creates a new record.
+    """
+    statement = select(CompanyProfile).where(CompanyProfile.company == profile_data.company)
+    result = await session.exec(statement)
+    existing_profile = result.first()
+
+    if existing_profile:
+        for key, value in profile_data.model_dump(exclude_unset=True).items():
+            if key not in ("id", "created_at"):
+                setattr(existing_profile, key, value)
+    else:
+        session.add(profile_data)
+
+    await session.commit()
+
+async def save_tailored_documents(
+    session: AsyncSession, 
+    job_url: str, 
+    cover_letter_text: str | None = None, 
+    latex_code: str | None = None
+) -> None:
+    """Finds job_listing_id by URL and saves associated Cover Letter and LaTeX Resume."""
+    statement = select(JobListing.id).where(JobListing.url == job_url)
+    result = await session.exec(statement)
+    job_id = result.first()
+
+    if not job_id:
+        print(f"⚠️ Could not map document to job row for URL: {job_url}")
         return
-        
-    job_id = job_row[0]
-    
-    cur.execute(
-        """
-        INSERT INTO cover_letter (job_listing_id, letter_text)
-        VALUES (%s, %s)
-        ON CONFLICT (job_listing_id) DO UPDATE SET
-            letter_text = EXCLUDED.letter_text,
-            created_at = CURRENT_TIMESTAMP;
-        """,
-        (job_id, letter.get("letter_text"))
-    )
-    
-    if letter.get("latex_code"):
-        cur.execute(
-            """
-            INSERT INTO resume (job_listing_id, latex_code)
-            VALUES (%s, %s)
-            ON CONFLICT (job_listing_id) DO UPDATE SET
-                latex_code = EXCLUDED.latex_code,
-                created_at = CURRENT_TIMESTAMP;
-            """,
-            (job_id, letter.get("latex_code"))
-        )
+
+    if cover_letter_text:
+        letter_stmt = select(TailoredCoverLetter).where(TailoredCoverLetter.job_listing_id == job_id)
+        letter_res = await session.exec(letter_stmt)
+        existing_letter = letter_res.first()
+
+        if existing_letter:
+            existing_letter.letter_text = cover_letter_text
+        else:
+            session.add(TailoredCoverLetter(job_listing_id=job_id, letter_text=cover_letter_text))
+
+    if latex_code:
+        resume_stmt = select(TailoredLatexResume).where(TailoredLatexResume.job_listing_id == job_id)
+        resume_res = await session.exec(resume_stmt)
+        existing_resume = resume_res.first()
+
+        if existing_resume:
+            existing_resume.latex_code = latex_code
+        else:
+            session.add(TailoredLatexResume(job_listing_id=job_id, latex_code=latex_code))
+
+    await session.commit()

@@ -1,7 +1,7 @@
 import datetime
 from langchain_core.runnables import RunnableConfig
 from src.state import AgentState
-from src.schemas import CompanyProfile
+from src.models import CompanyProfile
 
 def process_and_parse_company_node(state: AgentState, config: RunnableConfig) -> dict:
     raw_results = state.get("raw_company_search_results", [])
